@@ -1,0 +1,39 @@
+function r = mm_empty_result()
+%MM_EMPTY_RESULT  Return a result struct initialised with NaN / empty defaults.
+r.success       = false;
+r.error         = '';
+r.I_registered  = [];
+r.I_coarse      = [];
+r.H             = eye(3);
+r.H_fine        = eye(3);
+r.kp1           = [];
+r.kp2           = [];
+r.n_kp1         = NaN;
+r.n_kp2         = NaN;
+r.n_putative    = NaN;
+r.n_final       = NaN;
+r.pts1          = [];
+r.pts2          = [];
+r.putative_pts1 = [];
+r.putative_pts2 = [];
+r.orientation1  = [];
+r.orient_method1= [];
+r.landmarks_vis = [];
+r.landmarks_therm = [];
+r.bbox          = [];
+r.detection_mode= '';
+r.masks         = [];
+r.region_offsets= zeros(7,2);
+r.region_conf   = zeros(7,1);
+r.region_rmse_fine   = [];
+r.region_rmse_coarse = [];
+r.rmse          = NaN;
+r.ncc           = NaN;
+r.ssim          = NaN;
+r.rmse_coarse   = NaN;
+r.ncc_coarse    = NaN;
+r.ssim_coarse   = NaN;
+r.runtime       = NaN;
+r.runtime_stages= struct('clahe',NaN,'coarse',NaN,'landmark',NaN,...
+                         'segment',NaN,'xcorr',NaN,'blend',NaN);
+end
