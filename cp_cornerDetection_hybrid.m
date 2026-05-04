@@ -8,15 +8,7 @@ function [cout, angle, edge_map, orient_method] = cp_cornerDetection_hybrid(I, I
 %   I           : grayscale thermal image (double or uint8)
 %   I_clahe     : CLAHE-enhanced thermal image used for gradient fallback
 %                 (pass [] to disable fallback, reverts to I)
-%   C           : curvature threshold ratio          (default 1.5)
-%   T_angle     : maximum corner obtuse angle        (default 170 deg)
-%   sig         : Gaussian sigma for curvature       (default 3)
-%   H_thresh    : Canny high threshold               (default 0.2)
-%   L_thresh    : Canny low  threshold               (default 0)
-%   Endpoint    : flag to add line endpoints         (default 1)
-%   Gap_size    : contour gap fill size (pixels)     (default 1)
-%   maxlength   : max curvature region of support    (default 2)
-%   rflag       : compute orientations flag          (default 0)
+%   C..rflag    : same parameters as cp_cornerDetection
 %
 %   cout         : detected corner positions [row col]
 %   angle        : orientation per corner (radians, [0 2pi))
@@ -69,7 +61,7 @@ end  % main function
 % ═══════════════════════════════════════════════════════════════════════════
 
 function [curve,curve_start,curve_end,curve_mode,cur_num,edge_map] = h_extract_curve(BW,Gap_size)
-% Extract ordered contour curves from binary edge map (same logic as cp_cornerDetection).
+% Extract ordered contour curves from binary edge map.
 [L,W] = size(BW);
 BW1 = zeros(L+2*Gap_size, W+2*Gap_size);
 BW_edge = zeros(L,W);
@@ -79,7 +71,7 @@ cur_num = 0;
 curve = {};
 curve_start = [];
 curve_end   = [];
-curve_mode  = [];
+curve_mode  = [];   % will be char once first row is assigned
 while ~isempty(r)
     point = [r(1), c(1)];
     cur = point;
@@ -95,7 +87,6 @@ while ~isempty(r)
         [I_,J_] = find(BW1(point(1)-Gap_size:point(1)+Gap_size, ...
                            point(2)-Gap_size:point(2)+Gap_size)==1);
     end
-    % Trace the other direction from seed
     point = [r(1), c(1)];
     BW1(point(1),point(2)) = 0;
     [I_,J_] = find(BW1(point(1)-Gap_size:point(1)+Gap_size, ...
@@ -116,7 +107,7 @@ while ~isempty(r)
     [r,c] = find(BW1==1);
 end
 for i = 1:cur_num
-    curve_start(i,:) = curve{i}(1,:);  %#ok<AGROW>
+    curve_start(i,:) = curve{i}(1,:);   %#ok<AGROW>
     curve_end(i,:)   = curve{i}(end,:); %#ok<AGROW>
     if (curve_start(i,1)-curve_end(i,1))^2 + (curve_start(i,2)-curve_end(i,2))^2 <= 4
         curve_mode(i,:) = 'loop';
@@ -133,7 +124,6 @@ function [cout, angle, orient_method] = h_get_corner(curve, curve_start, curve_e
         curve_mode, curve_num, BW, sig, Endpoint, C, T_angle, maxlength, rflag, ...
         Gx, Gy, MIN_CONTOUR)
 % Detect corners with hybrid orientation assignment.
-% Uses sequential for-loop (not parfor) so orient_method can be tracked.
 cout = [];
 angle = [];
 orient_method = [];  % 1=CAO, 0=gradient fallback
@@ -156,8 +146,10 @@ for i = 1:curve_num
     L_ = length(x);
     if L_ <= W_, continue; end
 
-    % ── Smooth the curve ──────────────────────────────────────────────
-    if strcmp(strtrim(curve_mode(i,:)),'loop')
+    % ── Smooth curve ───────────────────────────────────────────────
+    % FIX: use element-wise == comparison (same as original cp_cornerDetection)
+    % curve_mode rows may be stored as double ASCII if initialised as []
+    if curve_mode(i,:) == 'loop'
         xL = [x(L_-W_+1:L_); x; x(1:W_)];
         yL = [y(L_-W_+1:L_); y; y(1:W_)];
     else
@@ -175,7 +167,7 @@ for i = 1:curve_num
     K   = abs((Xu.*Yuu - Xuu.*Yu) ./ ((Xu.^2 + Yu.^2).^1.5));
     K   = ceil(K*100)/100;
 
-    % ── Local maxima of curvature ─────────────────────────────────────
+    % ── Local curvature maxima ─────────────────────────────────────
     extremum = [];
     N_ = length(K);
     n_ = 0;
@@ -240,9 +232,8 @@ for i = 1:curve_num
     lambda_LR = lambda_LR(valid,:);
     n_ = length(extremum);
 
-    % ── Accumulate corners with CAO orientation ───────────────────────
-    % All curvature corners come from curves with L_ > W_ >= MIN_CONTOUR
-    % so orient_method = 1 (CAO) always for this block.
+    % ── Accumulate corners ───────────────────────────────────────────────
+    % All curvature corners have L_ > W_ > MIN_CONTOUR → orient_method = 1 (CAO)
     for j = 1:n_
         cout = [cout; curve{i}(extremum(j),:)]; %#ok<AGROW>
         if rflag
@@ -267,7 +258,7 @@ for i = 1:curve_num
                 ori = h_quadrant_angle(vm(1), vm(2));
             end
             angle        = [angle;        ori]; %#ok<AGROW>
-            orient_method= [orient_method; 1];  %#ok<AGROW>  % CAO
+            orient_method= [orient_method; 1];  %#ok<AGROW>
         end
     end
 end  % curve loop
@@ -276,7 +267,8 @@ end  % curve loop
 if Endpoint
     for i = 1:curve_num
         retail = size(curve{i},1);
-        if retail > 0 && strcmp(strtrim(curve_mode(i,:)),'line')
+        % FIX: element-wise == comparison, same as original cp_cornerDetection
+        if retail > 0 && all(curve_mode(i,:) == 'line')
 
             % ─ Start endpoint ─
             if ~isempty(cout)
@@ -288,7 +280,6 @@ if Endpoint
                 cout = [cout; curve_start(i,:)]; %#ok<AGROW>
                 if rflag
                     if retail >= MIN_CONTOUR
-                        % CAO orientation for start endpoint
                         xx_ep = curve{i}(1,2);  yy_ep = curve{i}(1,1);
                         n_pts = min(retail, maxlength);
                         coef2 = exp(-((n_pts-1:-1:0)/sigmaLs).^2/2);
@@ -297,13 +288,12 @@ if Endpoint
                         yL_ = sum(coef2' .* curve{i}(1:n_pts,1));
                         ori = h_quadrant_angle(xL_-xx_ep, yL_-yy_ep);
                         angle        = [angle;        ori]; %#ok<AGROW>
-                        orient_method= [orient_method;  1]; %#ok<AGROW>  % CAO
+                        orient_method= [orient_method;  1]; %#ok<AGROW>
                     else
-                        % Gradient histogram fallback for short contour
                         r_ep = curve_start(i,1);  c_ep = curve_start(i,2);
                         ori  = h_gradient_orientation(Gx, Gy, r_ep, c_ep, 2);
                         angle        = [angle;        ori]; %#ok<AGROW>
-                        orient_method= [orient_method;  0]; %#ok<AGROW>  % gradient
+                        orient_method= [orient_method;  0]; %#ok<AGROW>
                     end
                 end
             end
@@ -327,12 +317,12 @@ if Endpoint
                         yL_ = sum(coef1' .* curve{i}(st:retail,1));
                         ori = h_quadrant_angle(xL_-xx_ep, yL_-yy_ep);
                         angle        = [angle;        ori]; %#ok<AGROW>
-                        orient_method= [orient_method;  1]; %#ok<AGROW>  % CAO
+                        orient_method= [orient_method;  1]; %#ok<AGROW>
                     else
                         r_ep = curve_end(i,1);  c_ep = curve_end(i,2);
                         ori  = h_gradient_orientation(Gx, Gy, r_ep, c_ep, 2);
                         angle        = [angle;        ori]; %#ok<AGROW>
-                        orient_method= [orient_method;  0]; %#ok<AGROW>  % gradient
+                        orient_method= [orient_method;  0]; %#ok<AGROW>
                     end
                 end
             end
@@ -343,28 +333,23 @@ end  % h_get_corner
 
 % ─────────────────────────────────────────────────────────────────────────
 function ori = h_gradient_orientation(Gx, Gy, r, c, half_win)
-% Dominant gradient orientation in (2*half_win+1) x (2*half_win+1) window.
 [nr, nc] = size(Gx);
 r1 = max(1, r-half_win);  r2 = min(nr, r+half_win);
 c1 = max(1, c-half_win);  c2 = min(nc, c+half_win);
 gx = Gx(r1:r2, c1:c2);
 gy = Gy(r1:r2, c1:c2);
-angles = atan2(gy(:), gx(:));       % [-pi, pi]
-angles = mod(angles, 2*pi);         % [0, 2*pi)
-if isempty(angles)
-    ori = 0;
-    return;
-end
+angles = atan2(gy(:), gx(:));
+angles = mod(angles, 2*pi);
+if isempty(angles), ori = 0; return; end
 n_bins = 36;
 edges  = linspace(0, 2*pi, n_bins+1);
 counts = histcounts(angles, edges);
 [~, imax] = max(counts);
-ori = (edges(imax) + edges(imax+1)) / 2;  % midpoint of peak bin
+ori = (edges(imax) + edges(imax+1)) / 2;
 end
 
 % ─────────────────────────────────────────────────────────────────────────
 function orientation = h_quadrant_angle(deltax, deltay)
-% Convert (deltax, deltay) direction vector to orientation in [0, 2*pi).
 if isnan(deltay) || isnan(deltax) || (deltax==0 && deltay==0)
     orientation = 0;
 elseif deltay >= 0 && deltax >= 0
@@ -378,7 +363,6 @@ end
 
 % ─────────────────────────────────────────────────────────────────────────
 function ang = h_curve_tangent(cur, center)
-% Compute the angle between tangent directions at a curve point (degrees).
 direction = zeros(1,2);
 for ii = 1:2
     if ii==1, crv = cur(center:-1:1,:);
